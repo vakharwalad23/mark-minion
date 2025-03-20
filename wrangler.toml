@@ -4,6 +4,11 @@ main = "src/index.ts"
 compatibility_date = "2024-07-25"
 compatibility_flags = ["nodejs_compat"]
 
+browser = { binding = "MFBROWSER" }
+
+[[durable_objects.bindings]]
+name = "BROWSER"
+class_name = "Browser"
 
 [[kv_namespaces]]
 binding = "BROWSER_KV"
@@ -18,3 +23,7 @@ simple = { limit = 5, period = 60 }
 
 [ai]
 binding = "AI_AGENT"
+
+[[migrations]]
+tag = "v1.0.0"
+new_classes = ["Browser"]
