@@ -18,8 +18,8 @@
   },
   "dependencies": {
     "@cloudflare/puppeteer": "^0.0.14",
-    "cheerio": "^1.0.0",
-    "process": "^0.11.10",
+    "mammoth": "^1.9.1",
+    "pdfjs-serverless": "^1.0.0",
     "react-tweet": "^3.2.1"
   }
 }
