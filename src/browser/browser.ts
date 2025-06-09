@@ -72,7 +72,7 @@ export class Browser {
 		if (!this.helper.isValidUrl(pageUrl)) return new Response('Invalid URL provided', { status: 400 });
 
 		// Determine content type and route to appropriate processor
-		const urlType = this.helper.determineUrlType(pageUrl);
+		const urlType = await this.helper.determineUrlType(pageUrl);
 
 		if (urlType === 'document') {
 			return this.handleDocumentRequest(pageUrl, enableDetailedResponse, unnecessaryFilter, contentType);
@@ -103,7 +103,7 @@ export class Browser {
 			return new Response('Invalid URL provided', { status: 400 });
 		}
 
-		const urlType = this.helper.determineUrlType(targetUrl);
+		const urlType = await this.helper.determineUrlType(targetUrl);
 
 		// Handle different types of content
 		if (urlType === 'document') {

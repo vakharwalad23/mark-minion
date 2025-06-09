@@ -8,7 +8,7 @@ export class DocumentProcessor {
 	}
 
 	async process(url: string, enableDetailedResponse: boolean, filter: boolean) {
-		const fileType = this.getFileType(url);
+		const fileType = await this.getFileType(url);
 		const cacheKey = `doc-${url}-${fileType}-${enableDetailedResponse}-${filter}`;
 
 		// Check cache
@@ -166,18 +166,68 @@ export class DocumentProcessor {
 		return chunks;
 	}
 
-	private getFileType(url: string): string {
+	private async getFileType(url: string): Promise<string> {
 		const urlObj = new URL(url);
 		const pathname = urlObj.pathname.toLowerCase();
 
+		// First check for file extensions
 		if (pathname.endsWith('.pdf')) return 'pdf';
 		if (pathname.endsWith('.docx')) return 'docx';
 		if (pathname.endsWith('.doc')) return 'doc';
 		if (pathname.endsWith('.txt')) return 'txt';
 		if (pathname.endsWith('.md')) return 'md';
 
-		// Check content-type if extension is not clear
+		// If no extension found, check Content-Type header
+		try {
+			const response = await fetch(url, { method: 'HEAD' });
+			const contentType = response.headers.get('content-type')?.toLowerCase() || '';
+
+			if (contentType.includes('application/pdf')) return 'pdf';
+			if (contentType.includes('application/vnd.openxmlformats-officedocument.wordprocessingml.document')) return 'docx';
+			if (contentType.includes('application/msword')) return 'doc';
+			if (contentType.includes('text/plain')) return 'txt';
+			if (contentType.includes('text/markdown')) return 'md';
+			if (contentType.includes('application/octet-stream')) {
+				// For Google Drive, try to infer from URL parameters or make a test request
+				if (url.includes('drive.google.com') || url.includes('docs.google.com')) {
+					return await this.inferGoogleDriveFileType(url);
+				}
+			}
+		} catch (error) {
+			console.error('Error checking content-type:', error);
+		}
+
 		return 'unknown';
+	}
+
+	private async inferGoogleDriveFileType(url: string): Promise<string> {
+		try {
+			// Try to get a small range of the file to check magic bytes
+			const response = await fetch(url, {
+				headers: { Range: 'bytes=0-10' },
+				method: 'GET',
+			});
+
+			if (response.ok) {
+				const buffer = await response.arrayBuffer();
+				const bytes = new Uint8Array(buffer);
+
+				// Check magic bytes for different file types
+				if (bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) {
+					return 'pdf'; // %PDF
+				}
+				if (bytes[0] === 0x50 && bytes[1] === 0x4b) {
+					return 'docx'; // ZIP-based (DOCX)
+				}
+				if (bytes[0] === 0xd0 && bytes[1] === 0xcf) {
+					return 'doc'; // OLE2 (DOC)
+				}
+			}
+		} catch (error) {
+			console.error('Error inferring Google Drive file type:', error);
+		}
+
+		return 'pdf';
 	}
 
 	async extractMetadata(url: string) {

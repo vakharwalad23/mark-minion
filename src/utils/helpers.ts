@@ -5,7 +5,7 @@ export class Helpers {
 		return /^(http|https):\/\/[^ "]+$/.test(url);
 	}
 
-	determineUrlType(url: string): 'webpage' | 'document' | 'video' | 'twitter' {
+	async determineUrlType(url: string): Promise<'webpage' | 'document' | 'video' | 'twitter'> {
 		const urlLower = url.toLowerCase();
 
 		// Twitter/X URLs
@@ -13,8 +13,13 @@ export class Helpers {
 			return 'twitter';
 		}
 
-		// Document URLs
+		// Document URLs - check extension first
 		if (this.isDocumentUrl(url)) {
+			return 'document';
+		}
+
+		// Check content-type for URLs without extensions
+		if (await this.isDocumentByContentType(url)) {
 			return 'document';
 		}
 
@@ -30,6 +35,36 @@ export class Helpers {
 		const documentExtensions = ['.pdf', '.doc', '.docx', '.txt', '.md'];
 		const urlLower = url.toLowerCase();
 		return documentExtensions.some((ext) => urlLower.includes(ext));
+	}
+
+	private async isDocumentByContentType(url: string): Promise<boolean> {
+		try {
+			// Check for common document hosting patterns
+			if (
+				url.includes('drive.google.com') ||
+				url.includes('dropbox.com') ||
+				url.includes('onedrive.live.com') ||
+				url.includes('docs.google.com')
+			) {
+				const response = await fetch(url, { method: 'HEAD' });
+				const contentType = response.headers.get('content-type')?.toLowerCase() || '';
+
+				const documentMimeTypes = [
+					'application/pdf',
+					'application/msword',
+					'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+					'text/plain',
+					'text/markdown',
+					'application/octet-stream', // Google Drive often uses this
+				];
+
+				return documentMimeTypes.some((mimeType) => contentType.includes(mimeType));
+			}
+		} catch (error) {
+			console.error('Error checking content type:', error);
+		}
+
+		return false;
 	}
 
 	private isVideoUrl(url: string): boolean {
