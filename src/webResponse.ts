@@ -1,135 +1,130 @@
 export const HTML = `
 <!DOCTYPE html>
 <html lang="en">
-	<head>
-		<meta charset="UTF-8" />
-		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<title>Web to Markdown Converter</title>
-		<script src="https://cdn.tailwindcss.com"></script>
-		<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-		<style>
-			body {
-				font-family: 'Inter', sans-serif;
-			}
-		</style>
-	</head>
-	<body class="bg-gray-100">
-		<div class="container mx-auto max-w-2xl px-4 py-8">
-			<h1 class="text-4xl font-bold mb-2">Web to Markdown Converter</h1>
-			<p class="text-gray-600 mb-8">Convert any web page to Markdown for use with language models.</p>
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Mark Minion - Content Extraction API</title>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { 
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                line-height: 1.6; 
+                color: #333; 
+                background: #fafafa;
+            }
+            .container { max-width: 800px; margin: 0 auto; padding: 20px; }
+            h1 { font-size: 2.5rem; font-weight: 600; margin-bottom: 10px; }
+            h2 { font-size: 1.5rem; font-weight: 500; margin: 40px 0 20px; color: #555; }
+            p { margin-bottom: 15px; color: #666; }
+            code { 
+                background: #f5f5f5; 
+                padding: 2px 6px; 
+                border-radius: 3px; 
+                font-family: 'SF Mono', Monaco, monospace;
+                font-size: 0.9em;
+            }
+            pre { 
+                background: #2d3748; 
+                color: #e2e8f0; 
+                padding: 20px; 
+                border-radius: 8px; 
+                overflow-x: auto; 
+                margin: 15px 0;
+                font-family: 'SF Mono', Monaco, monospace;
+            }
+            .subtitle { font-size: 1.1rem; color: #777; margin-bottom: 30px; }
+            .example { margin: 25px 0; }
+            .example h3 { font-size: 1rem; font-weight: 500; margin-bottom: 10px; color: #444; }
+            .footer { margin-top: 60px; padding-top: 30px; border-top: 1px solid #eee; text-align: center; }
+            .footer a { color: #667eea; text-decoration: none; margin: 0 15px; }
+            .footer a:hover { text-decoration: underline; }
+            .param { 
+                margin: 15px 0; 
+                padding: 15px 0; 
+                border-bottom: 1px solid #f0f0f0; 
+            }
+            .param:last-child { border-bottom: none; }
+            .param-name { font-weight: 500; color: #333; }
+            .param-desc { color: #666; margin-top: 5px; }
+            .required { color: #e53e3e; font-size: 0.8em; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🕷️ Mark Minion</h1>
+            <p class="subtitle">Convert any web content into clean Markdown format</p>
+            
+            <p>A simple API that extracts and converts web content, documents, videos, and social media posts into structured Markdown. Built for developers who need clean content for AI applications.</p>
 
-			<form id="convertForm" class="space-y-6">
-				<div>
-					<label for="url" class="block text-sm font-medium text-gray-700 mb-1">URL</label>
-					<input
-						type="url"
-						id="url"
-						name="url"
-						placeholder="Enter a web page URL"
-						required
-						class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-					/>
-				</div>
+            <h2>Getting Started</h2>
+            <p>Make a GET request with a URL parameter:</p>
+            <pre>curl "https://markminion.dhruvvakharwala.dev/?url=https://example.com"</pre>
 
-				<div class="grid grid-cols-2 gap-4">
-					<div class="flex items-center justify-between">
-						<span class="text-sm font-medium text-gray-700">Detailed Response</span>
-						<label class="switch">
-							<input type="checkbox" id="detailed" class="sr-only peer" />
-							<span class="slider round bg-gray-200 peer-checked:bg-blue-600"></span>
-						</label>
-					</div>
-					<div class="flex items-center justify-between">
-						<span class="text-sm font-medium text-gray-700">Unnecessary Filter</span>
-						<label class="switch">
-							<input type="checkbox" id="unnecessaryfilter" class="sr-only peer" />
-							<span class="slider round bg-gray-200 peer-checked:bg-blue-600"></span>
-						</label>
-					</div>
-				</div>
+            <h2>Parameters</h2>
+            
+            <div class="param">
+                <div class="param-name">url <span class="required">*required</span></div>
+                <div class="param-desc">The URL you want to extract content from</div>
+            </div>
+            
+            <div class="param">
+                <div class="param-name">detailed</div>
+                <div class="param-desc">Get more comprehensive content extraction</div>
+            </div>
+            
+            <div class="param">
+                <div class="param-name">subpage</div>
+                <div class="param-desc">Also extract content from linked pages (up to 10)</div>
+            </div>
+            
+            <div class="param">
+                <div class="param-name">unnecessaryfilter</div>
+                <div class="param-desc">Apply AI filtering to remove ads and irrelevant content</div>
+            </div>
 
-				<button type="submit" class="w-full bg-black text-white py-2 px-4 rounded-md hover:bg-gray-800 transition duration-300">
-					Convert
-				</button>
-			</form>
+            <h2>Examples</h2>
 
-			<div class="mt-8 bg-white p-6 rounded-lg shadow">
-				<h2 class="text-xl font-semibold mb-4">API Usage</h2>
-				<p class="mb-4">
-					To use this as an API, make a GET request to <code class="bg-gray-100 px-1 py-0.5 rounded">/</code> with the following parameters:
-				</p>
-				<ul class="list-disc pl-5 space-y-2 mb-4">
-					<li><code class="font-semibold">url</code>: The URL of the web page to convert.</li>
-					<li><code class="font-semibold">detailed</code>: (optional) Set to true to get a more detailed response.</li>
-					<li><code class="font-semibold">subpage</code>: (optional) Set to true to crawl and convert all subpages.</li>
-					<li><code class="font-semibold">unnecessaryfilter</code>: (optional) Set to true to apply a language model filter.</li>
-					<li>
-						<code class="font-semibold">contenttype</code>: Set to text/plain or application/json to specify the desired output
-						format.
-					</li>
-				</ul>
-				<p class="font-medium mb-2">Example:</p>
-				<pre class="bg-gray-100 p-3 rounded-md overflow-x-auto">
-$ curl 'https://markminion.dhruvvakharwala.dev/?url=https://example.com&subpage=true'
-            </pre
-				>
-			</div>
-		</div>
+            <div class="example">
+                <h3>Extract a webpage</h3>
+                <pre>curl "https://markminion.dhruvvakharwala.dev/?url=https://news.ycombinator.com"</pre>
+            </div>
 
-		<style>
-			.switch {
-				position: relative;
-				display: inline-block;
-				width: 48px;
-				height: 24px;
-			}
+            <div class="example">
+                <h3>Get PDF content</h3>
+                <pre>curl "https://markminion.dhruvvakharwala.dev/?url=https://example.com/paper.pdf"</pre>
+            </div>
 
-			.slider {
-				position: absolute;
-				cursor: pointer;
-				top: 0;
-				left: 0;
-				right: 0;
-				bottom: 0;
-				transition: 0.4s;
-				border-radius: 34px;
-			}
+            <div class="example">
+                <h3>YouTube video info</h3>
+                <pre>curl "https://markminion.dhruvvakharwala.dev/?url=https://youtube.com/watch?v=dQw4w9WgXcQ"</pre>
+            </div>
 
-			.slider:before {
-				position: absolute;
-				content: '';
-				height: 20px;
-				width: 20px;
-				left: 2px;
-				bottom: 2px;
-				background-color: white;
-				transition: 0.4s;
-				border-radius: 50%;
-			}
+            <div class="example">
+                <h3>Twitter thread</h3>
+                <pre>curl "https://markminion.dhruvvakharwala.dev/?url=https://x.com/user/status/123456"</pre>
+            </div>
 
-			input:checked + .slider:before {
-				transform: translateX(24px);
-			}
-		</style>
+            <div class="example">
+                <h3>With AI filtering</h3>
+                <pre>curl "https://markminion.dhruvvakharwala.dev/?url=https://blog.example.com&unnecessaryfilter=true"</pre>
+            </div>
 
-		<script>
-			document.addEventListener('DOMContentLoaded', function () {
-			const form = document.getElementById('convertForm');
-				form.addEventListener('submit', function (event) {
-					event.preventDefault();
-					const url = document.getElementById('url').value;
-					const detailed = document.getElementById('detailed').checked;
-					const unnecessaryfilter = document.getElementById('unnecessaryfilter').checked;
+            <h2>What it supports</h2>
+            <p>Web pages, PDFs, Word documents, YouTube videos, Twitter/X posts, Google Docs, and more. Returns clean Markdown that's perfect for feeding into language models or documentation systems.</p>
 
-					let redirectURL = \`/?url=\${encodeURIComponent(url)}\`;
-					if (detailed) redirectURL += '&detailed=true';
-					if (unnecessaryfilter) redirectURL += '&unnecessaryfilter=true';
+            <h2>Response format</h2>
+            <p>By default, returns plain Markdown text. Add <code>Content-Type: application/json</code> header to get structured JSON with metadata.</p>
 
-					window.location.href = redirectURL;
-				});
-			});
-		</script>
-	</body>
+            <div class="footer">
+                <p>Built with ❤️ using Cloudflare Workers</p>
+                <div>
+                    <a href="https://github.com/vakharwalad23/mark-minion">GitHub</a>
+                    <a href="https://github.com/vakharwalad23/mark-minion/issues">Issues</a>
+                    <a href="https://github.com/vakharwalad23/mark-minion/blob/main/README.md">Docs</a>
+                </div>
+            </div>
+        </div>
+    </body>
 </html>
-
-`
+`;
