@@ -141,3 +141,20 @@ export interface TwitterProcessResult {
 		error?: string;
 	};
 }
+
+export interface DocumentResult {
+	url: string;
+	content: string;
+	metadata: {
+		type: string;
+		size?: number;
+		numPages?: number;
+		info?: any;
+		extractedAt: string;
+		fileType: string;
+		contentLength: number;
+		originalUrl: string;
+		processedUrl?: string;
+		error?: string;
+	};
+}

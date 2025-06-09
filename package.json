@@ -20,6 +20,7 @@
     "@cloudflare/puppeteer": "^0.0.14",
     "mammoth": "^1.9.1",
     "pdfjs-serverless": "^1.0.0",
-    "react-tweet": "^3.2.1"
+    "react-tweet": "^3.2.1",
+    "xlsx": "^0.18.5"
   }
 }

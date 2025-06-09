@@ -1,4 +1,5 @@
 import { Env } from '../../worker-configuration';
+import { DocumentResult } from '../types';
 
 export class DocumentProcessor {
 	private env: Env;
@@ -7,137 +8,275 @@ export class DocumentProcessor {
 		this.env = env;
 	}
 
-	async process(url: string, enableDetailedResponse: boolean, filter: boolean) {
-		const fileType = await this.getFileType(url);
+	async process(url: string, enableDetailedResponse: boolean, filter: boolean): Promise<DocumentResult> {
+		const processedUrl = this.normalizeUrl(url);
+		const fileType = await this.detectFileType(processedUrl);
 		const cacheKey = `doc-${url}-${fileType}-${enableDetailedResponse}-${filter}`;
 
-		// Check cache
 		const cached = await this.env.BROWSER_KV.get(cacheKey);
-		if (cached) {
-			return JSON.parse(cached);
-		}
-
-		let content = '';
-		let metadata = {};
+		if (cached) return JSON.parse(cached);
 
 		try {
-			const response = await fetch(url);
+			const response = await fetch(processedUrl);
 			if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
 			const arrayBuffer = await response.arrayBuffer();
+			const { content, metadata } = await this.extractContent(arrayBuffer, fileType);
 
-			switch (fileType) {
-				case 'pdf':
-					const result = await this.processPDF(arrayBuffer);
-					content = result.text;
-					metadata = result.metadata;
-					break;
-				case 'docx':
-					content = await this.processDocx(arrayBuffer);
-					metadata = { type: 'docx', size: arrayBuffer.byteLength };
-					break;
-				case 'doc':
-					content = await this.processDoc(arrayBuffer);
-					metadata = { type: 'doc', size: arrayBuffer.byteLength };
-					break;
-				case 'txt':
-					content = new TextDecoder().decode(arrayBuffer);
-					metadata = { type: 'txt', size: arrayBuffer.byteLength };
-					break;
-				case 'md':
-					content = new TextDecoder().decode(arrayBuffer);
-					metadata = { type: 'markdown', size: arrayBuffer.byteLength };
-					break;
-				default:
-					throw new Error(`Unsupported file type: ${fileType}`);
-			}
+			const filteredContent = filter && content.length > 1000 ? await this.applyAIFiltering(content) : content;
 
-			// Apply AI filtering if requested and content is large
-			if (filter && content.length > 1000) {
-				content = await this.applyChunkedFiltering(content);
-			}
-
-			const result = {
+			const result: DocumentResult = {
 				url,
-				content,
+				content: filteredContent,
 				metadata: {
 					...metadata,
 					extractedAt: new Date().toISOString(),
 					fileType,
-					contentLength: content.length,
+					contentLength: filteredContent.length,
+					originalUrl: url,
+					processedUrl: processedUrl !== url ? processedUrl : undefined,
 				},
 			};
 
-			// Cache result
 			await this.env.BROWSER_KV.put(cacheKey, JSON.stringify(result), { expirationTtl: 1800 });
 			return result;
 		} catch (error: any) {
-			console.error(`Document processing error for ${url}: ${error}`);
 			return {
 				url,
 				content: `Error processing document: ${error.message}`,
-				metadata: { error: error.message, fileType },
+				metadata: {
+					error: error.message,
+					fileType,
+					originalUrl: url,
+					type: 'error',
+					extractedAt: new Date().toISOString(),
+					contentLength: 0,
+				},
 			};
 		}
+	}
+
+	async extractMetadata(url: string) {
+		try {
+			const response = await fetch(url, { method: 'HEAD' });
+			return {
+				url,
+				contentType: response.headers.get('content-type') || '',
+				contentLength: parseInt(response.headers.get('content-length') || '0'),
+				lastModified: response.headers.get('last-modified') || '',
+				fileType: await this.detectFileType(url),
+				extractedAt: new Date().toISOString(),
+			};
+		} catch (error: any) {
+			return {
+				url,
+				error: error.message,
+				extractedAt: new Date().toISOString(),
+			};
+		}
+	}
+
+	private normalizeUrl(url: string): string {
+		if (url.includes('docs.google.com/document')) {
+			const docId = url.match(/\/document\/d\/([a-zA-Z0-9-_]+)/)?.[1];
+			return docId ? `https://docs.google.com/document/d/${docId}/export?format=txt` : url;
+		}
+
+		if (url.includes('docs.google.com/spreadsheets')) {
+			const sheetId = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)?.[1];
+			return sheetId ? `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=xlsx` : url;
+		}
+
+		if (url.includes('docs.google.com/presentation')) {
+			const slideId = url.match(/\/presentation\/d\/([a-zA-Z0-9-_]+)/)?.[1];
+			return slideId ? `https://docs.google.com/presentation/d/${slideId}/export?format=txt` : url;
+		}
+
+		if (url.includes('drive.google.com/file')) {
+			const fileId = url.match(/\/file\/d\/([a-zA-Z0-9-_]+)/)?.[1];
+			return fileId ? `https://drive.google.com/uc?export=download&id=${fileId}` : url;
+		}
+
+		return url;
+	}
+
+	private async detectFileType(url: string): Promise<string> {
+		// Google Docs export URLs
+		if (url.includes('docs.google.com') && url.includes('export')) {
+			const format = url.match(/format=([^&]+)/)?.[1]?.toLowerCase();
+			const formatMap: Record<string, string> = {
+				txt: 'txt',
+				pdf: 'pdf',
+				docx: 'docx',
+				html: 'html',
+				xlsx: 'xlsx',
+				odt: 'txt',
+				csv: 'txt',
+			};
+			return formatMap[format || 'txt'] || 'txt';
+		}
+
+		// File extensions
+		const pathname = new URL(url).pathname.toLowerCase();
+		const extensions = ['.pdf', '.docx', '.doc', '.txt', '.md', '.html', '.htm', '.xlsx'];
+		for (const ext of extensions) {
+			if (pathname.endsWith(ext)) return ext.slice(1);
+		}
+
+		// Content-Type fallback
+		try {
+			const response = await fetch(url, { method: 'HEAD' });
+			const contentType = response.headers.get('content-type')?.toLowerCase() || '';
+
+			const typeMap: Record<string, string> = {
+				'application/pdf': 'pdf',
+				'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+				'application/msword': 'doc',
+				'text/plain': 'txt',
+				'text/markdown': 'md',
+				'text/html': 'html',
+				'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+			};
+
+			for (const [mime, type] of Object.entries(typeMap)) {
+				if (contentType.includes(mime)) return type;
+			}
+
+			if (contentType.includes('application/octet-stream') && (url.includes('drive.google.com') || url.includes('docs.google.com'))) {
+				return await this.detectByMagicBytes(url);
+			}
+		} catch (error) {
+			console.error('Error checking content-type:', error);
+		}
+
+		return 'txt';
+	}
+
+	private async detectByMagicBytes(url: string): Promise<string> {
+		try {
+			const response = await fetch(url, {
+				headers: { Range: 'bytes=0-10' },
+				method: 'GET',
+			});
+
+			if (response.ok) {
+				const bytes = new Uint8Array(await response.arrayBuffer());
+				if (bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) return 'pdf';
+				if (bytes[0] === 0x50 && bytes[1] === 0x4b) return 'docx';
+				if (bytes[0] === 0xd0 && bytes[1] === 0xcf) return 'doc';
+			}
+		} catch (error) {
+			console.error('Error checking magic bytes:', error);
+		}
+		return 'pdf';
+	}
+
+	private async extractContent(arrayBuffer: ArrayBuffer, fileType: string) {
+		const processors: Record<string, () => Promise<{ content: string; metadata: any }>> = {
+			pdf: () => this.processPDF(arrayBuffer),
+			docx: async () => ({
+				content: await this.processDocx(arrayBuffer),
+				metadata: { type: 'docx', size: arrayBuffer.byteLength },
+			}),
+			doc: async () => ({
+				content: await this.processDoc(arrayBuffer),
+				metadata: { type: 'doc', size: arrayBuffer.byteLength },
+			}),
+			txt: () =>
+				Promise.resolve({
+					content: new TextDecoder().decode(arrayBuffer),
+					metadata: { type: 'txt', size: arrayBuffer.byteLength },
+				}),
+			md: () =>
+				Promise.resolve({
+					content: new TextDecoder().decode(arrayBuffer),
+					metadata: { type: 'markdown', size: arrayBuffer.byteLength },
+				}),
+			html: () =>
+				Promise.resolve({
+					content: this.extractTextFromHtml(new TextDecoder().decode(arrayBuffer)),
+					metadata: { type: 'html', size: arrayBuffer.byteLength },
+				}),
+			xlsx: async () => ({
+				content: await this.processXlsx(arrayBuffer),
+				metadata: { type: 'xlsx', size: arrayBuffer.byteLength },
+			}),
+		};
+
+		const processor = processors[fileType];
+		if (!processor) throw new Error(`Unsupported file type: ${fileType}`);
+
+		const result = await processor();
+		return { content: result.content, metadata: result.metadata };
 	}
 
 	private async processPDF(arrayBuffer: ArrayBuffer) {
-		try {
-			// Use pdfjs-serverless for PDF processing
-			const pdfjsLib = await import('pdfjs-serverless');
+		const pdfjsLib = await import('pdfjs-serverless');
+		const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
 
-			const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-			let fullText = '';
-			const metadata = {
+		let content = '';
+		for (let i = 1; i <= pdf.numPages; i++) {
+			const page = await pdf.getPage(i);
+			const textContent = await page.getTextContent();
+			const pageText = textContent.items.map((item: any) => item.str).join(' ');
+			content += `\n\nPage ${i}:\n${pageText}`;
+		}
+
+		return {
+			content: content.trim(),
+			metadata: {
+				type: 'pdf',
+				size: arrayBuffer.byteLength,
 				numPages: pdf.numPages,
 				info: await pdf.getMetadata(),
-			};
-
-			for (let i = 1; i <= pdf.numPages; i++) {
-				const page = await pdf.getPage(i);
-				const textContent = await page.getTextContent();
-				const pageText = textContent.items.map((item: any) => item.str).join(' ');
-				fullText += `\n\nPage ${i}:\n${pageText}`;
-			}
-
-			return { text: fullText.trim(), metadata };
-		} catch (error) {
-			console.error('PDF processing error:', error);
-			throw new Error('Failed to process PDF');
-		}
+			},
+		};
 	}
 
-	private async processDocx(arrayBuffer: ArrayBuffer) {
-		try {
-			// Use mammoth for DOCX processing
-			const mammoth = await import('mammoth');
-			const result = await mammoth.extractRawText({ arrayBuffer });
-			return result.value;
-		} catch (error) {
-			console.error('DOCX processing error:', error);
-			throw new Error('Failed to process DOCX');
-		}
+	private async processDocx(arrayBuffer: ArrayBuffer): Promise<string> {
+		const mammoth = await import('mammoth');
+		const result = await mammoth.extractRawText({ arrayBuffer });
+		return result.value;
 	}
 
-	private async processDoc(arrayBuffer: ArrayBuffer) {
-		// For legacy DOC files, we'll need a different approach
-		// This is a simplified version - you might need a more robust solution
-		try {
-			const text = new TextDecoder('utf-8', { fatal: false }).decode(arrayBuffer);
-			// Basic cleanup for DOC files (this is very basic and may not work for all DOC files)
-			return text
-				.replace(/[\x00-\x1F\x7F-\x9F]/g, ' ')
-				.replace(/\s+/g, ' ')
-				.trim();
-		} catch (error) {
-			console.error('DOC processing error:', error);
-			throw new Error('Failed to process DOC file');
-		}
+	private async processDoc(arrayBuffer: ArrayBuffer): Promise<string> {
+		const text = new TextDecoder('utf-8', { fatal: false }).decode(arrayBuffer);
+		return text
+			.replace(/[\x00-\x1F\x7F-\x9F]/g, ' ')
+			.replace(/\s+/g, ' ')
+			.trim();
 	}
 
-	private async applyChunkedFiltering(content: string): Promise<string> {
-		const chunkSize = 3000; // Smaller chunks for AI processing
-		const chunks = this.chunkText(content, chunkSize);
+	private async processXlsx(arrayBuffer: ArrayBuffer): Promise<string> {
+		const XLSX = await import('xlsx');
+		const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+
+		return workbook.SheetNames.map((sheetName) => {
+			const worksheet = workbook.Sheets[sheetName];
+			const sheetData = XLSX.utils.sheet_to_txt(worksheet);
+			return `\n\nSheet: ${sheetName}\n${sheetData}`;
+		})
+			.join('')
+			.trim();
+	}
+
+	private extractTextFromHtml(html: string): string {
+		return html
+			.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+			.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+			.replace(/<[^>]+>/g, ' ')
+			.replace(/&nbsp;/g, ' ')
+			.replace(/&amp;/g, '&')
+			.replace(/&lt;/g, '<')
+			.replace(/&gt;/g, '>')
+			.replace(/&quot;/g, '"')
+			.replace(/&#39;/g, "'")
+			.replace(/\s+/g, ' ')
+			.trim();
+	}
+
+	private async applyAIFiltering(content: string): Promise<string> {
+		const chunks = this.chunkText(content, 3000);
 		const filteredChunks: string[] = [];
 
 		for (const chunk of chunks) {
@@ -151,7 +290,7 @@ export class DocumentProcessor {
 				filteredChunks.push(response);
 			} catch (error) {
 				console.error('AI filtering error for chunk:', error);
-				filteredChunks.push(chunk); // Keep original if filtering fails
+				filteredChunks.push(chunk);
 			}
 		}
 
@@ -164,93 +303,5 @@ export class DocumentProcessor {
 			chunks.push(text.slice(i, i + chunkSize));
 		}
 		return chunks;
-	}
-
-	private async getFileType(url: string): Promise<string> {
-		const urlObj = new URL(url);
-		const pathname = urlObj.pathname.toLowerCase();
-
-		// First check for file extensions
-		if (pathname.endsWith('.pdf')) return 'pdf';
-		if (pathname.endsWith('.docx')) return 'docx';
-		if (pathname.endsWith('.doc')) return 'doc';
-		if (pathname.endsWith('.txt')) return 'txt';
-		if (pathname.endsWith('.md')) return 'md';
-
-		// If no extension found, check Content-Type header
-		try {
-			const response = await fetch(url, { method: 'HEAD' });
-			const contentType = response.headers.get('content-type')?.toLowerCase() || '';
-
-			if (contentType.includes('application/pdf')) return 'pdf';
-			if (contentType.includes('application/vnd.openxmlformats-officedocument.wordprocessingml.document')) return 'docx';
-			if (contentType.includes('application/msword')) return 'doc';
-			if (contentType.includes('text/plain')) return 'txt';
-			if (contentType.includes('text/markdown')) return 'md';
-			if (contentType.includes('application/octet-stream')) {
-				// For Google Drive, try to infer from URL parameters or make a test request
-				if (url.includes('drive.google.com') || url.includes('docs.google.com')) {
-					return await this.inferGoogleDriveFileType(url);
-				}
-			}
-		} catch (error) {
-			console.error('Error checking content-type:', error);
-		}
-
-		return 'unknown';
-	}
-
-	private async inferGoogleDriveFileType(url: string): Promise<string> {
-		try {
-			// Try to get a small range of the file to check magic bytes
-			const response = await fetch(url, {
-				headers: { Range: 'bytes=0-10' },
-				method: 'GET',
-			});
-
-			if (response.ok) {
-				const buffer = await response.arrayBuffer();
-				const bytes = new Uint8Array(buffer);
-
-				// Check magic bytes for different file types
-				if (bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) {
-					return 'pdf'; // %PDF
-				}
-				if (bytes[0] === 0x50 && bytes[1] === 0x4b) {
-					return 'docx'; // ZIP-based (DOCX)
-				}
-				if (bytes[0] === 0xd0 && bytes[1] === 0xcf) {
-					return 'doc'; // OLE2 (DOC)
-				}
-			}
-		} catch (error) {
-			console.error('Error inferring Google Drive file type:', error);
-		}
-
-		return 'pdf';
-	}
-
-	async extractMetadata(url: string) {
-		try {
-			const response = await fetch(url, { method: 'HEAD' });
-			const contentType = response.headers.get('content-type') || '';
-			const contentLength = response.headers.get('content-length') || '0';
-			const lastModified = response.headers.get('last-modified') || '';
-
-			return {
-				url,
-				contentType,
-				contentLength: parseInt(contentLength),
-				lastModified,
-				fileType: this.getFileType(url),
-				extractedAt: new Date().toISOString(),
-			};
-		} catch (error: any) {
-			return {
-				url,
-				error: error.message,
-				extractedAt: new Date().toISOString(),
-			};
-		}
 	}
 }
