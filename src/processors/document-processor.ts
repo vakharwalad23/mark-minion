@@ -1,11 +1,14 @@
 import { Env } from '../../worker-configuration';
 import { DocumentResult } from '../types';
+import { AIUtils } from '../utils/ai-utils';
 
 export class DocumentProcessor {
 	private env: Env;
+	private aiUtils: AIUtils;
 
 	constructor(env: Env) {
 		this.env = env;
+		this.aiUtils = new AIUtils(env);
 	}
 
 	async process(url: string, enableDetailedResponse: boolean, filter: boolean): Promise<DocumentResult> {
@@ -23,7 +26,7 @@ export class DocumentProcessor {
 			const arrayBuffer = await response.arrayBuffer();
 			const { content, metadata } = await this.extractContent(arrayBuffer, fileType);
 
-			const filteredContent = filter && content.length > 1000 ? await this.applyAIFiltering(content) : content;
+			const filteredContent = filter && content.length > 1000 ? await this.aiUtils.applyChunkedFiltering(content) : content;
 
 			const result: DocumentResult = {
 				url,
@@ -101,7 +104,6 @@ export class DocumentProcessor {
 	}
 
 	private async detectFileType(url: string): Promise<string> {
-		// Google Docs export URLs
 		if (url.includes('docs.google.com') && url.includes('export')) {
 			const format = url.match(/format=([^&]+)/)?.[1]?.toLowerCase();
 			const formatMap: Record<string, string> = {
@@ -116,14 +118,12 @@ export class DocumentProcessor {
 			return formatMap[format || 'txt'] || 'txt';
 		}
 
-		// File extensions
 		const pathname = new URL(url).pathname.toLowerCase();
 		const extensions = ['.pdf', '.docx', '.doc', '.txt', '.md', '.html', '.htm', '.xlsx'];
 		for (const ext of extensions) {
 			if (pathname.endsWith(ext)) return ext.slice(1);
 		}
 
-		// Content-Type fallback
 		try {
 			const response = await fetch(url, { method: 'HEAD' });
 			const contentType = response.headers.get('content-type')?.toLowerCase() || '';
@@ -273,35 +273,5 @@ export class DocumentProcessor {
 			.replace(/&#39;/g, "'")
 			.replace(/\s+/g, ' ')
 			.trim();
-	}
-
-	private async applyAIFiltering(content: string): Promise<string> {
-		const chunks = this.chunkText(content, 3000);
-		const filteredChunks: string[] = [];
-
-		for (const chunk of chunks) {
-			try {
-				const { response } = (await this.env.AI_AGENT.run('@cf/mistral/mistral-7b-instruct-v0.1', {
-					prompt: `Clean and summarize this text, removing irrelevant information and keeping important content:\n\n${chunk}\n\nCleaned text:`,
-					temperature: 0.2,
-					max_tokens: 1000,
-				})) as { response: string };
-
-				filteredChunks.push(response);
-			} catch (error) {
-				console.error('AI filtering error for chunk:', error);
-				filteredChunks.push(chunk);
-			}
-		}
-
-		return filteredChunks.join('\n\n');
-	}
-
-	private chunkText(text: string, chunkSize: number): string[] {
-		const chunks: string[] = [];
-		for (let i = 0; i < text.length; i += chunkSize) {
-			chunks.push(text.slice(i, i + chunkSize));
-		}
-		return chunks;
 	}
 }

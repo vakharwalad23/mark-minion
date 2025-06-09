@@ -1,29 +1,48 @@
 import type { Browser, Page } from '@cloudflare/puppeteer';
 import { Env } from '../../worker-configuration';
 import { BotProtectionBypass } from '../utils/bot-protection';
-
-const PAGE_TIMEOUT = 30000;
+import { AIUtils } from '../utils/ai-utils';
 
 export class ContentProcessor {
 	private env: Env;
 	private botProtection: BotProtectionBypass;
+	private aiUtils: AIUtils;
 
 	constructor(env: Env) {
 		this.env = env;
 		this.botProtection = new BotProtectionBypass();
+		this.aiUtils = new AIUtils(env);
 	}
 
 	async processWebpage(browser: Browser, url: string, enableDetailedResponse: boolean, filter: boolean, request: Request) {
 		const ip = request.headers.get('cf-connecting-ip') || '';
 		const cacheKey = url + (enableDetailedResponse ? '-detailed' : '') + (filter ? '-llm' : '');
 
-		// Check cache
 		const cached = await this.env.BROWSER_KV.get(cacheKey);
 		if (cached) {
-			return { url, content: cached, metadata: { fromCache: true } };
+			try {
+				const cachedData = JSON.parse(cached);
+				return {
+					url,
+					content: cachedData.content || cached,
+					metadata: {
+						...cachedData.metadata,
+						cached: true,
+						retrievedAt: new Date().toISOString(),
+					},
+				};
+			} catch {
+				return {
+					url,
+					content: cached,
+					metadata: {
+						cached: true,
+						retrievedAt: new Date().toISOString(),
+					},
+				};
+			}
 		}
 
-		// Rate limiting
 		const token = request.headers.get('Authorization')?.replace('Bearer ', '') ?? '';
 		if (token !== this.env.BACKEND_SECURITY_TOKEN) {
 			const { success } = await this.env.RENDER_RATE_LIMITER.limit({ key: ip });
@@ -36,41 +55,38 @@ export class ContentProcessor {
 		await this.botProtection.setupPage(page);
 
 		try {
-			// Navigate with bot protection
 			const navigationSuccess = await this.botProtection.navigateWithRetry(page, url);
 			if (!navigationSuccess) {
 				throw new Error('Failed to navigate after multiple attempts');
 			}
 
-			// Extract content
 			let content = await this.extractContent(page, enableDetailedResponse);
-
-			// Extract metadata
 			const metadata = await this.extractPageMetadata(page);
 
-			// Apply chunked filtering if requested
 			if (filter && content.length > 1000) {
-				content = await this.applyChunkedFiltering(content);
+				content = await this.aiUtils.applyChunkedFiltering(content);
 			}
 
-			// Cache result
-			await this.env.BROWSER_KV.put(cacheKey, content, { expirationTtl: 1800 });
-
-			return {
+			const result = {
 				url,
 				content,
 				metadata: {
 					...metadata,
 					extractedAt: new Date().toISOString(),
 					contentLength: content.length,
+					cached: false,
 				},
 			};
+
+			await this.env.BROWSER_KV.put(cacheKey, JSON.stringify(result), { expirationTtl: 1800 });
+
+			return result;
 		} catch (error: any) {
 			console.error(`Content processing failed for ${url}: ${error}`);
 			return {
 				url,
 				content: `Error processing page: ${error.message}`,
-				metadata: { error: error.message },
+				metadata: { error: error.message, cached: false },
 			};
 		} finally {
 			await page.close().catch((e) => console.error(`Page close error: ${e}`));
@@ -105,19 +121,15 @@ export class ContentProcessor {
 
 	private async extractContent(page: Page, enableDetailedResponse: boolean): Promise<string> {
 		try {
-			// Try advanced extraction with injected scripts
 			const markdown = await page.evaluate(async (detailed) => {
-				// Inject Readability.js
 				const readabilityScript = document.createElement('script');
 				readabilityScript.src = 'https://unpkg.com/@mozilla/readability/Readability.js';
 				document.head.appendChild(readabilityScript);
 
-				// Inject Turndown.js
 				const turndownScript = document.createElement('script');
 				turndownScript.src = 'https://unpkg.com/turndown/dist/turndown.js';
 				document.head.appendChild(turndownScript);
 
-				// Wait for scripts to load
 				await new Promise((resolve, reject) => {
 					let loaded = 0;
 					const checkLoaded = () => {
@@ -129,7 +141,6 @@ export class ContentProcessor {
 					setTimeout(() => reject(new Error('Script load timeout')), 3000);
 				});
 
-				// Use Readability to parse content
 				const reader = new (window as any).Readability(document.cloneNode(true), {
 					charThreshold: 0,
 					keepClasses: true,
@@ -137,7 +148,6 @@ export class ContentProcessor {
 				});
 				const article = reader.parse();
 
-				// Convert to Markdown
 				const turndownService = new (window as any).TurndownService({
 					headingStyle: 'atx',
 					bulletListMarker: '-',
@@ -159,7 +169,6 @@ export class ContentProcessor {
 
 	private async fallbackExtraction(page: Page, enableDetailedResponse: boolean): Promise<string> {
 		return page.evaluate((detailed) => {
-			// Manual HTML-to-Markdown conversion
 			function htmlToMarkdown(html: string): string {
 				const cleaned = html.replace(
 					/<script[\s\S]*?>[\s\S]*?<\/script>|<style[\s\S]*?>[\s\S]*?<\/style>|<iframe[\s\S]*?>[\s\S]*?<\/iframe>/gi,
@@ -218,36 +227,5 @@ export class ContentProcessor {
 				.map((link) => (link as HTMLAnchorElement).href)
 				.filter((link) => link.startsWith(baseUrl) && link !== baseUrl);
 		}, baseUrl);
-	}
-
-	private async applyChunkedFiltering(content: string): Promise<string> {
-		const chunkSize = 3000;
-		const chunks = this.chunkText(content, chunkSize);
-		const filteredChunks: string[] = [];
-
-		for (const chunk of chunks) {
-			try {
-				const { response } = (await this.env.AI_AGENT.run('@cf/mistral/mistral-7b-instruct-v0.1', {
-					prompt: `Clean and summarize this text, removing ads and irrelevant info, keeping important content:\n\n${chunk}\n\nCleaned text:`,
-					temperature: 0.2,
-					max_tokens: 1000,
-				})) as { response: string };
-
-				filteredChunks.push(response);
-			} catch (error) {
-				console.error('AI filtering error for chunk:', error);
-				filteredChunks.push(chunk);
-			}
-		}
-
-		return filteredChunks.join('\n\n');
-	}
-
-	private chunkText(text: string, chunkSize: number): string[] {
-		const chunks: string[] = [];
-		for (let i = 0; i < text.length; i += chunkSize) {
-			chunks.push(text.slice(i, i + chunkSize));
-		}
-		return chunks;
 	}
 }

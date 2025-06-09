@@ -5,6 +5,7 @@ compatibility_date = "2024-07-25"
 compatibility_flags = ["nodejs_compat"]
 
 browser = { binding = "MFBROWSER" }
+placement = { mode = "smart"}
 
 [[durable_objects.bindings]]
 name = "BROWSER"
