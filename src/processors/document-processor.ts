@@ -211,8 +211,9 @@ export class DocumentProcessor {
 	}
 
 	private async processPDF(arrayBuffer: ArrayBuffer) {
-		const pdfjsLib = await import('pdfjs-serverless');
-		const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+		const { resolvePDFJS } = await import('pdfjs-serverless');
+		const { getDocument } = await resolvePDFJS();
+		const pdf = await getDocument({ data: arrayBuffer }).promise;
 
 		let content = '';
 		for (let i = 1; i <= pdf.numPages; i++) {
