@@ -21,6 +21,8 @@ _Convert any web content into clean, structured Markdown format with advanced bo
 
 ---
 
+> 🙏 A humble request I am currently on the free plan of Cloudflare Workers, so there is a daily limit on browser rendering, which means it might not work for websites and tweet URLs all the time. You can deploy your own Markminion easily. Everything else will work all the time.
+
 ## ✨ Features
 
 ### 🌐 Universal Content Support
