@@ -229,7 +229,7 @@ export class DocumentProcessor {
 				type: 'pdf',
 				size: arrayBuffer.byteLength,
 				numPages: pdf.numPages,
-				info: await pdf.getMetadata(),
+				info: (await pdf.getMetadata()).info,
 			},
 		};
 	}
