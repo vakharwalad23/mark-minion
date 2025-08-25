@@ -20,8 +20,28 @@ export class DocumentProcessor {
 		if (cached) return JSON.parse(cached);
 
 		try {
-			const response = await fetch(processedUrl);
-			if (!response.ok) throw new Error(`HTTP ${response.status}`);
+			const response = await fetch(processedUrl, {
+				headers: {
+					'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+					Accept: 'application/pdf,application/octet-stream,*/*',
+					'Accept-Language': 'en-US,en;q=0.9',
+				},
+			});
+
+			if (!response.ok) {
+				// Handle specific HTTP errors with better messages
+				if (response.status === 409) {
+					throw new Error(
+						`Document temporarily unavailable (HTTP 409). This often occurs with Blob Storage due to access restrictions. Please try again later or use a direct download link.`
+					);
+				} else if (response.status === 403) {
+					throw new Error(`Access forbidden (HTTP 403). The document may require authentication or have restricted access.`);
+				} else if (response.status === 404) {
+					throw new Error(`Document not found (HTTP 404). Please verify the URL is correct.`);
+				} else {
+					throw new Error(`HTTP ${response.status}: ${response.statusText || 'Unknown error'}`);
+				}
+			}
 
 			const arrayBuffer = await response.arrayBuffer();
 			const { content, metadata } = await this.extractContent(arrayBuffer, fileType);
@@ -125,7 +145,13 @@ export class DocumentProcessor {
 		}
 
 		try {
-			const response = await fetch(url, { method: 'HEAD' });
+			const response = await fetch(url, {
+				method: 'HEAD',
+				headers: {
+					'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+					Accept: '*/*',
+				},
+			});
 			const contentType = response.headers.get('content-type')?.toLowerCase() || '';
 
 			const typeMap: Record<string, string> = {
@@ -155,7 +181,11 @@ export class DocumentProcessor {
 	private async detectByMagicBytes(url: string): Promise<string> {
 		try {
 			const response = await fetch(url, {
-				headers: { Range: 'bytes=0-10' },
+				headers: {
+					Range: 'bytes=0-10',
+					'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+					Accept: '*/*',
+				},
 				method: 'GET',
 			});
 

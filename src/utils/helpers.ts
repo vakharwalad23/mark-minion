@@ -25,8 +25,13 @@ export class Helpers {
 		if (this.isTwitterUrl(urlLower)) return 'twitter';
 		if (this.isGoogleDocsUrl(urlLower)) return 'document';
 		if (this.isDocumentUrl(urlLower)) return 'document';
-		if (await this.isDocumentByContentType(url)) return 'document';
 		if (this.isVideoUrl(urlLower)) return 'video';
+
+		// Check content-type for URLs that might be documents but don't have file extensions
+		// This includes cloud storage URLs and known document servers
+		if (this.shouldCheckContentType(urlLower)) {
+			if (await this.isDocumentByContentType(url)) return 'document';
+		}
 
 		return 'webpage';
 	}
@@ -59,10 +64,16 @@ export class Helpers {
 	}
 
 	private async isDocumentByContentType(url: string): Promise<boolean> {
-		if (!this.isCloudStorageUrl(url)) return false;
-
+		// Always check content-type for URLs without clear file extensions
+		// or for known cloud storage URLs
 		try {
-			const response = await fetch(url, { method: 'HEAD' });
+			const response = await fetch(url, {
+				method: 'HEAD',
+				headers: {
+					'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+					Accept: '*/*',
+				},
+			});
 			const contentType = response.headers.get('content-type')?.toLowerCase() || '';
 			return Helpers.DOCUMENT_MIME_TYPES.some((mime) => contentType.includes(mime));
 		} catch {
@@ -70,12 +81,43 @@ export class Helpers {
 		}
 	}
 
+	private shouldCheckContentType(url: string): boolean {
+		return (
+			// Check cloud storage URLs
+			this.isCloudStorageUrl(url) ||
+			// Check known document servers like arXiv
+			url.includes('arxiv.org') ||
+			url.includes('biorxiv.org') ||
+			url.includes('medrxiv.org') ||
+			url.includes('researchgate.net') ||
+			url.includes('academia.edu') ||
+			url.includes('semanticscholar.org') ||
+			url.includes('ieee.org') ||
+			url.includes('acm.org') ||
+			// Check URLs that might be document endpoints without extensions
+			(url.includes('/pdf/') && !this.hasFileExtension(url)) ||
+			(url.includes('/document/') && !this.hasFileExtension(url)) ||
+			(url.includes('/paper/') && !this.hasFileExtension(url)) ||
+			(url.includes('/download/') && !this.hasFileExtension(url))
+		);
+	}
+
+	private hasFileExtension(url: string): boolean {
+		const pathname = new URL(url).pathname;
+		const lastPart = pathname.split('/').pop() || '';
+		return /\.\w{2,4}$/.test(lastPart);
+	}
+
 	private isCloudStorageUrl(url: string): boolean {
 		return (
 			url.includes('drive.google.com') ||
 			url.includes('dropbox.com') ||
 			url.includes('onedrive.live.com') ||
-			url.includes('docs.google.com')
+			url.includes('docs.google.com') ||
+			url.includes('.blob.core.windows.net') ||
+			url.includes('s3.amazonaws.com') ||
+			url.includes('.amazonaws.com') ||
+			url.includes('storage.googleapis.com')
 		);
 	}
 }

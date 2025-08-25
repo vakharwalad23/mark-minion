@@ -15,7 +15,7 @@ export class ContentProcessor {
 	}
 
 	async processWebpage(browser: Browser, url: string, enableDetailedResponse: boolean, filter: boolean, request: Request) {
-		const ip = request.headers.get('cf-connecting-ip') || '';
+		const ip = request.headers.get('cf-connecting-ip') || request.headers.get('x-forwarded-for') || 'localhost';
 		const cacheKey = url + (enableDetailedResponse ? '-detailed' : '') + (filter ? '-llm' : '');
 
 		const cached = await this.env.BROWSER_KV.get(cacheKey);

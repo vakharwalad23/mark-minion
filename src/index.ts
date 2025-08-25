@@ -4,7 +4,7 @@ import { Env } from '../worker-configuration';
 
 export default {
 	async fetch(req: Request, env: Env) {
-		const ip = req.headers.get('cf-connecting-ip');
+		const ip = req.headers.get('cf-connecting-ip') || req.headers.get('x-forwarded-for') || 'localhost';
 		const url = new URL(req.url);
 
 		// Metadata route
