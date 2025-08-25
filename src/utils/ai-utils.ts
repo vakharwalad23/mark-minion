@@ -13,7 +13,7 @@ export class AIUtils {
 
 		for (const chunk of chunks) {
 			try {
-				const { response } = (await this.env.AI_AGENT.run('@cf/mistral/mistral-7b-instruct-v0.1', {
+				const { response } = (await this.env.AI_AGENT.run('@cf/meta/llama-3-8b-instruct', {
 					prompt: `Clean and summarize this text, removing ads and irrelevant info, keeping important content:\n\n${chunk}\n\nCleaned text:`,
 					temperature: 0.2,
 					max_tokens: 1000,
